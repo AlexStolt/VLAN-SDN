@@ -93,7 +93,7 @@ class SimpleSwitch(app_manager.RyuApp):
 		datapath.send_msg(mod)
 
 	def send_arp_reply(self, actions, datapath, src_mac_str, dst_mac_str, src_ip_str, dst_ip_str):
-		self.logger.info("\033[91m ARP Reply: [%s %s] -> [%s %s]\033[00m", 
+		self.logger.info("\033[32mARP Reply: [%s %s] -> [%s %s]\033[00m", 
 			src_mac_str, src_ip_str, dst_mac_str, dst_ip_str)
 
 		ofproto = datapath.ofproto
@@ -162,8 +162,8 @@ class SimpleSwitch(app_manager.RyuApp):
 		self.vlan_200_mac_to_port.setdefault(dpid, {})
 
 
-		# Ignore Multicast Packets
-		if (not int(dst.split(':')[0], 16) % 2 or dst == 'ff:ff:ff:ff:ff:ff')  and not DEBUG:	
+		# Ignore Multicast Packets except Broadcast
+		if (not int(dst.split(':')[0], 16) % 2 or dst == 'ff:ff:ff:ff:ff:ff') and not DEBUG:	
 			self.logger.info("packet in %s %s %s %s in_port=%s", hex(dpid).ljust(4), hex(ethertype), src, dst, msg.in_port)
 		elif DEBUG:
 			self.logger.info("packet in %s %s %s %s in_port=%s", hex(dpid).ljust(4), hex(ethertype), src, dst, msg.in_port)
@@ -193,7 +193,7 @@ class SimpleSwitch(app_manager.RyuApp):
 					]
 					dst_ip_mask = 24
 
-				elif '192.168.1.' in ip_pkt.dst:
+				elif '192.168.1.' in ip_pkt.dst and ip_pkt.dst in left_router_arp_table:
 					actions = [
 						datapath.ofproto_parser.OFPActionSetDlSrc("00:00:00:00:01:01"),
 						datapath.ofproto_parser.OFPActionSetDlDst(left_router_arp_table[ip_pkt.dst]),
@@ -203,18 +203,33 @@ class SimpleSwitch(app_manager.RyuApp):
 				else:
 					# Exclude Ethernet Header
 					data = msg.data[14:]
+					
+					# Message was not received from the other router
+					if msg.in_port != 1 and  msg.in_port != 4:
+						src_mac = '00:00:00:00:01:01'
+						dst_mac = eth.src
+						src_ip = '192.168.1.1'
+						out_port = 2
+					
+					# Message was received from the other router and this router does not
+					# have an ARP entry for the destination MAC
+					else:
+						src_mac = '00:00:00:00:05:01' 	# PLACEHOLDER MUST CHANGE
+						dst_mac = '00:00:00:00:05:02'	# PLACEHOLDER MUST CHANGE
+						src_ip = '192.168.1.1' 			# PLACEHOLDER MUST CHANGE
+						out_port = msg.in_port
+					
 
 					# Create ICMP Packet
 					icmp_reply = packet.Packet()
 					icmp_reply.add_protocol(ethernet.ethernet(
-						ethertype=ethertype, dst=src, src='00:00:00:00:01:01'))
-					icmp_reply.add_protocol(
-						ipv4.ipv4(dst=ip_pkt.src, src='192.168.1.1', proto=inet.IPPROTO_ICMP))
+						ethertype=ethertype, dst=dst_mac, src=src_mac))
+					icmp_reply.add_protocol(ipv4.ipv4(dst=ip_pkt.src, src=src_ip, proto=inet.IPPROTO_ICMP))
 					icmp_reply.add_protocol(icmp.icmp(type_=icmp.ICMP_DEST_UNREACH, code=icmp.ICMP_HOST_UNREACH_CODE,
 													  data=icmp.dest_unreach(data_len=len(data), data=data)))
 					icmp_reply.serialize()
 
-					actions = [datapath.ofproto_parser.OFPActionOutput(2)]
+					actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
 
 					# Send Packet to Router
 					out = datapath.ofproto_parser.OFPPacketOut(
@@ -264,7 +279,7 @@ class SimpleSwitch(app_manager.RyuApp):
 					]
 					dst_ip_mask = 24
 
-				elif '192.168.2.' in ip_pkt.dst:
+				elif '192.168.2.' in ip_pkt.dst and ip_pkt.dst in right_router_arp_table:
 					actions = [
 						datapath.ofproto_parser.OFPActionSetDlSrc("00:00:00:00:02:01"),
 						datapath.ofproto_parser.OFPActionSetDlDst(right_router_arp_table[ip_pkt.dst]),
@@ -275,17 +290,33 @@ class SimpleSwitch(app_manager.RyuApp):
 				else:
 					# Exclude Ethernet Header
 					data = msg.data[14:]
+					
+					# Message was not received from the other router
+					if msg.in_port != 1 and msg.in_port != 4:
+						src_mac = '00:00:00:00:02:01'
+						dst_mac = eth.src
+						src_ip = '192.168.2.1'
+						out_port = 2
+					
+					# Message was received from the other router and this router does not
+					# have an ARP entry for the destination MAC
+					else:
+						src_mac = '00:00:00:00:05:02'	# PLACEHOLDER MUST CHANGE
+						dst_mac = '00:00:00:00:05:01'	# PLACEHOLDER MUST CHANGE
+						src_ip = '192.168.2.1' 			# PLACEHOLDER MUST CHANGE
+						out_port = msg.in_port
+					
 
 					# Create ICMP Packet
 					icmp_reply = packet.Packet()
 					icmp_reply.add_protocol(ethernet.ethernet(
-						ethertype=ethertype, dst=src, src='00:00:00:00:02:01'))
-					icmp_reply.add_protocol(ipv4.ipv4(dst=ip_pkt.src, src='192.168.2.1', proto=inet.IPPROTO_ICMP))
+						ethertype=ethertype, dst=dst_mac, src=src_mac))
+					icmp_reply.add_protocol(ipv4.ipv4(dst=ip_pkt.src, src=src_ip, proto=inet.IPPROTO_ICMP))
 					icmp_reply.add_protocol(icmp.icmp(type_=icmp.ICMP_DEST_UNREACH, code=icmp.ICMP_HOST_UNREACH_CODE,
 													  data=icmp.dest_unreach(data_len=len(data), data=data)))
 					icmp_reply.serialize()
 
-					actions = [datapath.ofproto_parser.OFPActionOutput(2)]
+					actions = [datapath.ofproto_parser.OFPActionOutput(out_port)]
 
 					# Send Packet to Router
 					out = datapath.ofproto_parser.OFPPacketOut(
@@ -315,12 +346,17 @@ class SimpleSwitch(app_manager.RyuApp):
 			self.net.add_edge(dpid, src, ports=[msg.in_port])
 			self.net.add_edge(src, dpid)
 		
-		if eth.dst not in self.net:
+		if eth.dst not in self.net and eth.src:
 			# The shortest path is computed based on the source and destination of the packet.
 			# The shortest path in this case indicates the hops needed to reach current dpid.
-			# When the in port is not the same as the shortest path suggest a loop is detected. 
-			path = nx.shortest_path(self.net, eth.src, dpid)
-			
+			# When the in port is not the same as the shortest path suggest a loop is detected.
+			# Try/Except is used here to handle incomplete topologies (topologies that are not yet 
+			# completely constructed) 
+			try:
+				path = nx.shortest_path(self.net, eth.src, dpid)
+			except:
+				return
+
 			port_in_shortest_path = False
 			for node in path:
 				# Node might not exists (LLDP Packets and Multicast) 
@@ -338,6 +374,9 @@ class SimpleSwitch(app_manager.RyuApp):
 			# In port is not on shortest path thus abort to avoid 
 			# further unessecary flooding
 			if not port_in_shortest_path:
+				if (not int(dst.split(':')[0], 16) % 2 or dst == 'ff:ff:ff:ff:ff:ff') and not DEBUG:
+					self.logger.info("\033[31mLoop Detected in %s %s %s %s in_port=%s\033[00m", 
+						hex(dpid).ljust(4), hex(ethertype), src, dst, msg.in_port)
 				return
 				
 

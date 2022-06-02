@@ -41,7 +41,8 @@ def myNet():
     s3 = net.addSwitch( 's3' , protocols=["OpenFlow10"], dpid='3' )
 
     # Create links 
-    net.addLink(s1a, s1b, port1=1, port2=1)   
+    net.addLink(s1a, s1b, port1=1, port2=1)
+    net.addLink(s1a, s1b, port1=4, port2=4) # Additional high-priority traffic port   
     net.addLink(s1a, s2, port1=2, port2=2)   
     net.addLink(s1b, s3, port1=2, port2=2)   
     net.addLink(s2, s3, port1=1, port2=1)
